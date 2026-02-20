@@ -514,7 +514,7 @@ const biomeData = {
           return texture;
       }
 
-  function generateEnvironment() {
+ function generateEnvironment() {
         // --- TEXTURE GENERATOR HELPER ---
         function createTexture(baseColor, speckColor) {
             const canvas = document.createElement('canvas');
@@ -533,14 +533,15 @@ const biomeData = {
             const texture = new THREE.CanvasTexture(canvas);
             texture.wrapS = THREE.RepeatWrapping;
             texture.wrapT = THREE.RepeatWrapping;
-            // Scaled back from 20 to 10 for the 5x map
             texture.repeat.set(10, 10); 
             return texture;
         }
 
+        // --- THE OPTIMIZER OBJECT ---
+        // This invisible dummy calculates the math before stamping it into the GPU
+        const dummy = new THREE.Object3D();
+
         // --- 1. BUILD MASSIVE CIRCULAR MAP (5x Scale) ---
-        
-        // CENTER: Forest (Radius is now 2000)
         const forestGeo = new THREE.CircleGeometry(2000, 64);
         const forestMat = new THREE.MeshStandardMaterial({ map: createTexture('#2d4c1e', '#1a2e11'), roughness: 0.9 }); 
         const forest = new THREE.Mesh(forestGeo, forestMat);
@@ -548,7 +549,6 @@ const biomeData = {
         scene.add(forest);
         worldMeshes.push(forest); 
 
-        // HELPER: Create Outer Ring Biomes (Outer edge is 10,000)
         function createWedge(baseColor, speckColor, startAngle, depth = 0) {
             const geo = new THREE.RingGeometry(2000, 10000, 64, 1, startAngle, Math.PI / 2);
             const mat = new THREE.MeshStandardMaterial({ map: createTexture(baseColor, speckColor), roughness: 0.9 });
@@ -569,134 +569,268 @@ const biomeData = {
             }
         }
 
-        // OUTER ZONES 
         createWedge('#3b2a1a', '#2a1a0c', 0);                    // Earth 
         createWedge('#d0e6f5', '#a0c6e5', Math.PI / 2);          // Sky 
         createWedge('#150025', '#0a0011', Math.PI, 0);           // Darkness 
         createWedge('#2a0f0f', '#1a0505', Math.PI * 1.5);        // Volcano        
 
-        // --- 4. DARKNESS (Giant Monoliths & Crystals) ---
-        const monolithMat = new THREE.MeshStandardMaterial({ map: createTexture('#05000a', '#222222'), roughness: 0.7 }); 
-        const crystalColors = ['#aa00ff', '#5500aa']; 
-
-        // Spawn spread out between 2200 and 9500
-        spawnProps(2200, 9500, Math.PI / 2, 800, (x, z) => {
-            const height = 30 + Math.random() * 100; 
-            const monolith = new THREE.Mesh(new THREE.BoxGeometry(20, height, 20), monolithMat);
-            monolith.position.set(x, height/2, z); 
-            scene.add(monolith); 
-            worldMeshes.push(monolith);
-
-            if (Math.random() > 0.5) {
-                const color = crystalColors[Math.floor(Math.random() * crystalColors.length)];
-                const crystalMat = new THREE.MeshStandardMaterial({ 
-                    map: createTexture(color, '#ffffff'), 
-                    emissive: new THREE.Color(color), 
-                    emissiveIntensity: 0.5 
-                });
-                const crystal = new THREE.Mesh(new THREE.OctahedronGeometry(8 + Math.random() * 10), crystalMat);
-                crystal.position.set(x + (Math.random() * 30 - 15), 5, z + (Math.random() * 30 - 15));
-                scene.add(crystal); 
-                worldMeshes.push(crystal);
-            }
-        });
-
-       // --- 2. FOREST (Normal-Sized Trees, 5x Map) ---
+        // --- 2. FOREST (Instanced Trees) ---
         const woodMat = new THREE.MeshStandardMaterial({ map: createTexture('#4a3018', '#2a1a0c'), roughness: 1.0 });
         const leafMat = new THREE.MeshStandardMaterial({ map: createTexture('#1e3f14', '#2d5c1e'), roughness: 0.8 });
         
-        // 2500 trees compressed into the new 2000 radius area
-        for(let i=0; i<2500; i++) {
-            const x = (Math.random() - 0.5) * 3800; // Scaled down from 7800
+        const treeCount = 2500;
+        const trunkGeo = new THREE.CylinderGeometry(2, 3, 1, 8); // Height is 1 so we can scale it
+        const leafGeo = new THREE.DodecahedronGeometry(1); // Size is 1 so we can scale it
+        
+        const iTrunks = new THREE.InstancedMesh(trunkGeo, woodMat, treeCount);
+        const iLeaves = new THREE.InstancedMesh(leafGeo, leafMat, treeCount);
+
+        let treeIndex = 0;
+        for(let i=0; i<6000; i++) {
+            if (treeIndex >= treeCount) break;
+            const x = (Math.random() - 0.5) * 3800; 
             const z = (Math.random() - 0.5) * 3800;
-            if (Math.sqrt(x*x + z*z) > 1900) continue; // Keep inside the 2000 radius forest
+            if (Math.sqrt(x*x + z*z) > 1900) continue; 
             
             const h = 20 + Math.random() * 30;
-            const tree = new THREE.Mesh(new THREE.CylinderGeometry(2, 3, h, 8), woodMat);
-            const top = new THREE.Mesh(new THREE.DodecahedronGeometry(10 + Math.random()*5), leafMat);
+            const leafSize = 10 + Math.random() * 5;
             
-            tree.position.set(x, h/2, z);
-            top.position.set(x, h, z);
-            scene.add(tree, top); 
-            worldMeshes.push(tree, top);
+            // Trunk
+            dummy.position.set(x, h/2, z);
+            dummy.scale.set(1, h, 1);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            iTrunks.setMatrixAt(treeIndex, dummy.matrix);
+
+            // Leaves
+            dummy.position.set(x, h, z);
+            dummy.scale.set(leafSize, leafSize, leafSize);
+            dummy.updateMatrix();
+            iLeaves.setMatrixAt(treeIndex, dummy.matrix);
+
+            treeIndex++;
         }
+        scene.add(iTrunks, iLeaves); 
+        worldMeshes.push(iTrunks); 
 
-        // --- 3. VOLCANO (Massive Obsidian Spikes) ---
+        // --- 3. VOLCANO (Instanced Obsidian Spikes) ---
         const obsMat = new THREE.MeshStandardMaterial({ map: createTexture('#111111', '#333333'), roughness: 0.5, metalness: 0.8 });
+        const spikeCount = 600;
+        const iSpikes = new THREE.InstancedMesh(new THREE.TetrahedronGeometry(40), obsMat, spikeCount);
         
-        spawnProps(2200, 9500, 0, 600, (x, z) => {
-            const spike = new THREE.Mesh(new THREE.TetrahedronGeometry(40), obsMat);
-            spike.position.set(x, 10, z);
-            spike.scale.set(1, 4 + Math.random() * 8, 1);
-            scene.add(spike); 
-            worldMeshes.push(spike);
+        let spikeIdx = 0;
+        spawnProps(2200, 9500, 0, spikeCount, (x, z) => {
+            dummy.position.set(x, 10, z);
+            dummy.scale.set(1, 4 + Math.random() * 8, 1);
+            dummy.rotation.set(0, Math.random() * Math.PI, 0);
+            dummy.updateMatrix();
+            iSpikes.setMatrixAt(spikeIdx, dummy.matrix);
+            spikeIdx++;
         });
+        scene.add(iSpikes); 
+        worldMeshes.push(iSpikes);
 
-        // --- 5. SKY (Massive Floating Platforms) ---
+        // --- 4. DARKNESS (Instanced Monoliths & Crystals) ---
+        const monolithMat = new THREE.MeshStandardMaterial({ map: createTexture('#05000a', '#222222'), roughness: 0.7 }); 
+        const monoCount = 800;
+        const iMonoliths = new THREE.InstancedMesh(new THREE.BoxGeometry(20, 1, 20), monolithMat, monoCount);
+        
+        // Setup two separate instanced meshes for the two different glowing crystal colors
+        const crystGeo = new THREE.OctahedronGeometry(1);
+        const cMat1 = new THREE.MeshStandardMaterial({ map: createTexture('#aa00ff', '#ffffff'), emissive: 0xaa00ff, emissiveIntensity: 0.5 });
+        const cMat2 = new THREE.MeshStandardMaterial({ map: createTexture('#5500aa', '#ffffff'), emissive: 0x5500aa, emissiveIntensity: 0.5 });
+        const iCryst1 = new THREE.InstancedMesh(crystGeo, cMat1, monoCount);
+        const iCryst2 = new THREE.InstancedMesh(crystGeo, cMat2, monoCount);
+
+        let monoIdx = 0, cIdx1 = 0, cIdx2 = 0;
+        
+        spawnProps(2200, 9500, Math.PI / 2, monoCount, (x, z) => {
+            const height = 30 + Math.random() * 100; 
+            dummy.position.set(x, height/2, z);
+            dummy.scale.set(1, height, 1);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            iMonoliths.setMatrixAt(monoIdx, dummy.matrix);
+            monoIdx++;
+
+            if (Math.random() > 0.5) {
+                const size = 8 + Math.random() * 10;
+                dummy.position.set(x + (Math.random() * 30 - 15), 5, z + (Math.random() * 30 - 15));
+                dummy.scale.set(size, size, size);
+                dummy.rotation.set(Math.random(), Math.random(), 0);
+                dummy.updateMatrix();
+                
+                if (Math.random() > 0.5) {
+                    iCryst1.setMatrixAt(cIdx1, dummy.matrix);
+                    cIdx1++;
+                } else {
+                    iCryst2.setMatrixAt(cIdx2, dummy.matrix);
+                    cIdx2++;
+                }
+            }
+        });
+        
+        // Trim the empty slots in the crystal arrays so the GPU doesn't draw invisible objects
+        iCryst1.count = cIdx1; 
+        iCryst2.count = cIdx2;
+        
+        scene.add(iMonoliths, iCryst1, iCryst2); 
+        worldMeshes.push(iMonoliths, iCryst1, iCryst2);
+
+        // --- 5. SKY (Instanced Floating Platforms) ---
         const cloudMat = new THREE.MeshStandardMaterial({ map: createTexture('#ffffff', '#e0e0e0'), roughness: 1.0 });
+        const islandCount = 600;
+        const iIslands = new THREE.InstancedMesh(new THREE.CylinderGeometry(80, 30, 15, 16), cloudMat, islandCount);
         
-        spawnProps(2200, 9500, Math.PI, 600, (x, z) => {
-            const island = new THREE.Mesh(new THREE.CylinderGeometry(80, 30, 15, 16), cloudMat);
-            island.position.set(x, 50 + Math.random() * 300, z);
-            scene.add(island); 
-            worldMeshes.push(island);
+        let islandIdx = 0;
+        spawnProps(2200, 9500, Math.PI, islandCount, (x, z) => {
+            dummy.position.set(x, 50 + Math.random() * 300, z);
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(0, 0, 0);
+            dummy.updateMatrix();
+            iIslands.setMatrixAt(islandIdx, dummy.matrix);
+            islandIdx++;
         });
+        scene.add(iIslands); 
+        worldMeshes.push(iIslands);
 
-        // --- 6. EARTH (Giant Crystals & Craters) ---
+        // --- 6. EARTH (Instanced Giant Crystals & Craters) ---
         const mudMat = new THREE.MeshStandardMaterial({ map: createTexture('#6b4423', '#4a2f18'), roughness: 0.9 });
+        const rockCount = 800;
+        const iRocks = new THREE.InstancedMesh(new THREE.OctahedronGeometry(60), mudMat, rockCount);
         
-        spawnProps(2200, 9500, Math.PI * 1.5, 800, (x, z) => {
-            const rock = new THREE.Mesh(new THREE.OctahedronGeometry(60), mudMat);
-            rock.position.set(x, 20, z);
-            rock.rotation.set(Math.random(), Math.random(), 0);
-            scene.add(rock); 
-            worldMeshes.push(rock);
+        let rockIdx = 0;
+        spawnProps(2200, 9500, Math.PI * 1.5, rockCount, (x, z) => {
+            dummy.position.set(x, 20, z);
+            dummy.scale.set(1, 1, 1);
+            dummy.rotation.set(Math.random(), Math.random(), 0);
+            dummy.updateMatrix();
+            iRocks.setMatrixAt(rockIdx, dummy.matrix);
+            rockIdx++;
         });
+        scene.add(iRocks); 
+        worldMeshes.push(iRocks);
+
+        // --- 7. BUILD THEMED TEMPLES (Boss Arenas) ---
+        for (const biomeName in biomeData) {
+            const biome = biomeData[biomeName];
+            const templeParts = [];
+
+            // 1. Determine Theme Colors based on Biome
+            let matColor = 0x888888;
+            if (biomeName === 'Forest') matColor = 0x557755;   // Mossy stone
+            if (biomeName === 'Volcano') matColor = 0x221111;  // Dark obsidian
+            if (biomeName === 'Darkness') matColor = 0x1a0033; // Deep purple stone
+            if (biomeName === 'Sky') matColor = 0xeeeeee;      // White marble
+            if (biomeName === 'Earth') matColor = 0x8b5a2b;    // Sandstone
+
+            // 2. Foundation (Raised platform: 160x160, 10 units tall)
+            const foundation = new THREE.BoxGeometry(160, 10, 160);
+            foundation.translate(0, 5, 0);
+            templeParts.push(foundation);
+
+            // 3. Stairs (Front entrance, leading up to the door)
+            for (let i = 0; i < 5; i++) {
+                const step = new THREE.BoxGeometry(40, 2, 10);
+                // Math to stack them like real stairs
+                step.translate(0, i * 2 + 1, 85 + (4 - i) * 10); 
+                templeParts.push(step);
+            }
+
+            // 4. Walls (Leaving the front open for a door)
+            const wallThick = 10;
+            const wallH = 40;
+            
+            const backWall = new THREE.BoxGeometry(160, wallH, wallThick);
+            backWall.translate(0, 10 + wallH/2, -75);
+            templeParts.push(backWall);
+            
+            const leftWall = new THREE.BoxGeometry(wallThick, wallH, 160);
+            leftWall.translate(-75, 10 + wallH/2, 0);
+            templeParts.push(leftWall);
+            
+            const rightWall = new THREE.BoxGeometry(wallThick, wallH, 160);
+            rightWall.translate(75, 10 + wallH/2, 0);
+            templeParts.push(rightWall);
+            
+            // Front walls (leaving a 40-unit gap in the middle for the entrance)
+            const frontWallL = new THREE.BoxGeometry(60, wallH, wallThick);
+            frontWallL.translate(-50, 10 + wallH/2, 75);
+            templeParts.push(frontWallL);
+            
+            const frontWallR = new THREE.BoxGeometry(60, wallH, wallThick);
+            frontWallR.translate(50, 10 + wallH/2, 75);
+            templeParts.push(frontWallR);
+
+            // 5. Roof (Tiered pyramid style)
+            const roof1 = new THREE.BoxGeometry(170, 5, 170);
+            roof1.translate(0, 10 + wallH + 2.5, 0);
+            templeParts.push(roof1);
+            
+            const roof2 = new THREE.BoxGeometry(150, 10, 150);
+            roof2.translate(0, 10 + wallH + 10, 0);
+            templeParts.push(roof2);
+
+            // 6. Merge everything into ONE highly optimized mesh
+            const mergedTempleGeo = BufferGeometryUtils.mergeGeometries(templeParts);
+            const templeMat = new THREE.MeshStandardMaterial({ color: matColor, roughness: 0.9 });
+            const finalTemple = new THREE.Mesh(mergedTempleGeo, templeMat);
+
+            // Move the whole structure to the biome center
+            finalTemple.position.set(biome.center.x, 0, biome.center.z);
+            
+            // Rotate the temple so the stairs face the center of the map (0,0)
+            finalTemple.lookAt(0, 0, 0);
+
+            scene.add(finalTemple);
+            worldMeshes.push(finalTemple); // Adds the walls, floor, and stairs to collision!
+        }
       }
 
       function spawnEntities() {
-    for (const biomeName in biomeData) {
-        const biome = biomeData[biomeName];
+        for (const biomeName in biomeData) {
+            const biome = biomeData[biomeName];
 
-        // 1. Build the Temple (Simple giant box for now)
-        const templeGeo = new THREE.BoxGeometry(100, 80, 100);
-        const templeMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.9 });
-        const temple = new THREE.Mesh(templeGeo, templeMat);
-        temple.position.set(biome.center.x, 40, biome.center.z);
-        scene.add(temple);
-        enemies.push({ mesh: temple, type: "temple", active: false });
+            // 1. Spawn the Boss INSIDE the Temple (Now a Cube!)
+            const bossGeo = new THREE.BoxGeometry(biome.boss.size, biome.boss.size, biome.boss.size);
+            const bossMat = new THREE.MeshStandardMaterial({ 
+                color: biome.boss.color, 
+                emissive: biome.boss.color, 
+                emissiveIntensity: 0.2 
+            });
+            const bossMesh = new THREE.Mesh(bossGeo, bossMat);
+            
+            // Y is set to 2 (floor height) + half the boss size so it doesn't sink into the ground
+            bossMesh.position.set(biome.center.x,10  + (biome.boss.size / 2), biome.center.z);
+            
+            // Hide by default for your optimizer
+            bossMesh.visible = false;
+            scene.add(bossMesh);
+            enemies.push({ ...biome.boss, mesh: bossMesh, type: "boss", active: false });
 
-        // 2. Spawn the Boss on top of the Temple
-        const bossGeo = new THREE.DodecahedronGeometry(biome.boss.size);
-        const bossMat = new THREE.MeshStandardMaterial({ color: biome.boss.color, emissive: biome.boss.color, emissiveIntensity: 0.2 });
-        const bossMesh = new THREE.Mesh(bossGeo, bossMat);
-        bossMesh.position.set(biome.center.x, 80 + biome.boss.size, biome.center.z);
-        scene.add(bossMesh);
-        enemies.push({ ...biome.boss, mesh: bossMesh, type: "boss", active: false });
+            // 2. Spawn 30 of each normal mob in this biome
+            biome.mobs.forEach(mobData => {
+                for (let i = 0; i < 30; i++) {
+                    const radius = biome.spawn.minR + Math.random() * (biome.spawn.maxR - biome.spawn.minR);
+                    const angle = biome.spawn.startA + Math.random() * (biome.spawn.endA - biome.spawn.startA);
+                    const x = Math.cos(angle) * radius;
+                    const z = Math.sin(angle) * radius;
 
-        // 3. Spawn 10 of each normal mob in this biome
-        biome.mobs.forEach(mobData => {
-            for (let i = 0; i < 30; i++) {
-                const radius = biome.spawn.minR + Math.random() * (biome.spawn.maxR - biome.spawn.minR);
-                const angle = biome.spawn.startA + Math.random() * (biome.spawn.endA - biome.spawn.startA);
-                const x = Math.cos(angle) * radius;
-                const z = Math.sin(angle) * radius;
-
-                const mobGeo = new THREE.BoxGeometry(mobData.size, mobData.size, mobData.size);
-                const mobMat = new THREE.MeshStandardMaterial({ color: mobData.color });
-                const mobMesh = new THREE.Mesh(mobGeo, mobMat);
-                
-                mobMesh.position.set(x, mobData.size / 2, z);
-                
-                // Hide them by default to save CPU!
-                mobMesh.visible = false; 
-                scene.add(mobMesh);
-                
-                enemies.push({ ...mobData, mesh: mobMesh, type: "mob", active: false });
-            }
-        });
-    }
-}
+                    const mobGeo = new THREE.BoxGeometry(mobData.size, mobData.size, mobData.size);
+                    const mobMat = new THREE.MeshStandardMaterial({ color: mobData.color });
+                    const mobMesh = new THREE.Mesh(mobGeo, mobMat);
+                    
+                    mobMesh.position.set(x, mobData.size / 2, z);
+                    
+                    // Hide them by default to save CPU!
+                    mobMesh.visible = false; 
+                    scene.add(mobMesh);
+                    
+                    enemies.push({ ...mobData, mesh: mobMesh, type: "mob", active: false });
+                }
+            });
+        }
+      }
       function onWindowResize() {
 
         camera.aspect = window.innerWidth / window.innerHeight;
