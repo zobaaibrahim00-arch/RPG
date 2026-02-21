@@ -514,7 +514,7 @@ const biomeData = {
           return texture;
       }
 
- function generateEnvironment() {
+  function generateEnvironment() {
         // --- TEXTURE GENERATOR HELPER ---
         function createTexture(baseColor, speckColor) {
             const canvas = document.createElement('canvas');
@@ -801,7 +801,7 @@ const biomeData = {
             const bossMesh = new THREE.Mesh(bossGeo, bossMat);
             
             // Y is set to 2 (floor height) + half the boss size so it doesn't sink into the ground
-            bossMesh.position.set(biome.center.x,10  + (biome.boss.size / 2), biome.center.z);
+            bossMesh.position.set(biome.center.x, 10 + (biome.boss.size / 2), biome.center.z);
             
             // Hide by default for your optimizer
             bossMesh.visible = false;
