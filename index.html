@@ -277,6 +277,7 @@
       const statusElement = document.getElementById('status');
       let isSprinting = false;
       let enemies = []; // Stores all active enemies
+      let isTargeting = false;
 const RENDER_RADIUS = 1500; // If you are further than this, the enemy "vanishes"
 
 const biomeData = {
@@ -370,9 +371,9 @@ const biomeData = {
 
         // 6. Mouse Look Controls (Only active when Shift Lock is ON)
         document.addEventListener('mousemove', (e) => {
-          if (isShiftLocked) {
-            const deltaX = e.clientX - previousMousePosition.x;
-            const deltaY = e.clientY - previousMousePosition.y;
+          if (isShiftLocked || document.pointerLockElement === document.body) {
+            const deltaX = e.movementX || 0;
+            const deltaY = e.movementY || 0;
 
             yaw -= deltaX * 0.005;  
             pitch -= deltaY * 0.005;
@@ -381,16 +382,18 @@ const biomeData = {
             camera.rotation.y = yaw;
             camera.rotation.x = pitch;
           }
-          // Always update previous position so it doesn't jump when toggled
-          previousMousePosition = { x: e.clientX, y: e.clientY };
         });
 
         // 7. Keyboard Controls
         const onKeyDown = (event) => {
-          // Toggle Shift Lock
-          if (event.code === 'ShiftLeft' || event.code === 'ShiftRight') {
+         // Toggle Shift Lock with Z
+          if (event.code === 'KeyZ') {
+            // 1. Lock the mouse so you don't hit the screen edge
+            if (document.pointerLockElement !== document.body) {
+                document.body.requestPointerLock();
+            }
+
             isShiftLocked = !isShiftLocked;
-            
             // Update UI text and color
             if (isShiftLocked) {
               statusElement.innerText = "Shift Lock: ON";
@@ -399,7 +402,7 @@ const biomeData = {
               statusElement.innerText = "Shift Lock: OFF";
               statusElement.classList.remove('active-status');
             }
-            return; // Prevent other actions on shift press
+            return;
           }
 
           // Movement & Actions
@@ -1101,13 +1104,25 @@ const biomeData = {
         if (moveBackward && canMove(direction.clone().negate())) player.position.addScaledVector(direction, -moveSpeed);
         if (moveLeft && canMove(right.clone().negate())) player.position.addScaledVector(right, -moveSpeed);
         if (moveRight && canMove(right)) player.position.addScaledVector(right, moveSpeed);
-        // --- 7. Update Camera ---
-        camera.position.copy(player.position);
-        camera.rotation.y = yaw;
-        camera.rotation.x = pitch;
-        
-        camera.translateZ(20); 
-        camera.translateY(6);
+       // --- 7. Update Camera ---
+        if (isShiftLocked) {
+            // ROBLOX MODE: Player turns with camera, over-the-shoulder view
+            player.rotation.y = yaw; 
+            
+            camera.position.copy(player.position);
+            camera.rotation.set(pitch, yaw, 0);
+            camera.translateX(3);  // Shift right (over shoulder)
+            camera.translateY(5);  // Move up
+            camera.translateZ(10); // Move back
+        } else {
+            // FREE CAM MODE: Your original camera setup
+            camera.position.copy(player.position);
+            camera.rotation.y = yaw;
+            camera.rotation.x = pitch;
+            
+            camera.translateZ(20); 
+            camera.translateY(6);
+        }
 
         renderer.render(scene, camera);
       }
