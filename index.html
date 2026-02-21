@@ -369,19 +369,21 @@ const biomeData = {
         spawnEntities();
         createAvatar(); // Build the player
 
-        // 6. Mouse Look Controls (Only active when Shift Lock is ON)
+        // 6. Mouse Look Controls
         document.addEventListener('mousemove', (e) => {
-          if (isShiftLocked || document.pointerLockElement === document.body) {
+            // e.movementX works perfectly whether the mouse is locked or not!
             const deltaX = e.movementX || 0;
             const deltaY = e.movementY || 0;
 
             yaw -= deltaX * 0.005;  
             pitch -= deltaY * 0.005;
+            
+            // Stop the camera from flipping upside down
             pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, pitch));
 
+            // Update camera rotation
             camera.rotation.y = yaw;
             camera.rotation.x = pitch;
-          }
         });
 
         // 7. Keyboard Controls
